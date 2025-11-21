@@ -8,6 +8,9 @@ import zipfile  # Read HTML files from ZIP archive for snippet extraction
 from indexer import build_reverse_index  # Build the reverse index from ZIP file
 from searcher import enhanced_search  # Perform search queries on the index
 from tokenizer import tokenize_html, HTMLTextExtractor  # Extract text content from HTML documents
+from result_manager import ResultManager  # Manage saved search results
+from keyword_extractor import extract_keywords  # Extract keywords from top results
+from correlation import calculate_correlations  # Calculate keyword correlations
 class SearchGUI:
     # Initialize the search GUI with root window and ZIP file
     def __init__(self, root, zip_file="rhf.zip"):
@@ -19,6 +22,7 @@ class SearchGUI:
         self.document_map = None
         self.zip_handle = None
         self.snippet_parser = None
+        self.result_manager = ResultManager()  # Initialize result manager
         self.load_data()
         self.setup_gui()
         self.zip_handle = zipfile.ZipFile(self.zip_file, 'r')
@@ -71,6 +75,8 @@ class SearchGUI:
         self.status_var.set("Searching...")
         self.root.update()
         self.results_text.delete(1.0, tk.END)
+        # This is where searching happens
+        # Need to get a list of top A pages from S
         results, message = enhanced_search(self.reverse_index, search_term, self.document_map)
         if results is None:
             self.results_text.insert(tk.END, f"Error: {message}\n")
@@ -108,7 +114,102 @@ class SearchGUI:
                     snippet = self.get_text_snippet(doc['doc_id'], doc['positions'][0])
                     self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
             self.results_text.insert(tk.END, "\n")
-        self.status_var.set(message)
+        # Save results for later use
+        self.save_top_results(results, search_term)
+        
+        # Reformulate query and run new search
+        reformulated_query = self.reformulate_query(search_term)
+        if reformulated_query and reformulated_query != search_term:
+            # Display separator and reformulated query info
+            self.results_text.insert(tk.END, "\n" + "="*70 + "\n")
+            self.results_text.insert(tk.END, f"REFORMULATED QUERY: {reformulated_query}\n")
+            self.results_text.insert(tk.END, "="*70 + "\n\n")
+            
+            # Run search with reformulated query
+            self.status_var.set("Searching with reformulated query...")
+            self.root.update()
+            
+            reformulated_results, reformulated_message = enhanced_search(
+                self.reverse_index, reformulated_query, self.document_map
+            )
+            
+            if reformulated_results:
+                self.results_text.insert(tk.END, f"{reformulated_message}:\n\n")
+                # Display reformulated results
+                for i, doc in enumerate(reformulated_results, 1):
+                    filename = doc['doc_id'].split('/')[-1]
+                    self.results_text.insert(tk.END, f"{i}. {filename}\n")
+                    if 'similarity' in doc:
+                        self.results_text.insert(tk.END, f"   - Similarity score: {doc['similarity']:.4f}\n")
+                        self.results_text.insert(tk.END, f"   - Matched terms: {', '.join(doc['matched_terms'])}\n")
+                        if doc['matched_terms']:
+                            first_term = doc['matched_terms'][0]
+                            if first_term in self.reverse_index:
+                                for doc_data in self.reverse_index[first_term]['docs']:
+                                    if doc_data['doc_id'] == doc['doc_id'] and doc_data['positions']:
+                                        snippet = self.get_text_snippet(doc['doc_id'], doc_data['positions'][0])
+                                        self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
+                                        break
+                    else:
+                        self.results_text.insert(tk.END, f"   - Appears {doc['term_freq']} times\n")
+                        self.results_text.insert(tk.END, f"   - TF-IDF score: {doc['tf_idf']:.4f}\n")
+                        self.results_text.insert(tk.END, f"   - Matched term: {doc['matched_term']}\n")
+                        if doc['positions']:
+                            positions_str = ', '.join(map(str, doc['positions'][:5]))
+                            if len(doc['positions']) > 5:
+                                positions_str += f", ... (+{len(doc['positions']) - 5} more)"
+                            self.results_text.insert(tk.END, f"   - Positions: [{positions_str}]\n")
+                            snippet = self.get_text_snippet(doc['doc_id'], doc['positions'][0])
+                            self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
+                    self.results_text.insert(tk.END, "\n")
+                self.status_var.set(f"{message} | Reformulated: {reformulated_message}")
+            else:
+                self.results_text.insert(tk.END, f"{reformulated_message}\n")
+                self.status_var.set(f"{message} | Reformulated query: {reformulated_query}")
+        else:
+            self.status_var.set(message)
+    
+    # Save top N results to result manager
+    def save_top_results(self, results, query, top_n=5):
+        """Save top N results from a search for later use in algorithms."""
+        self.result_manager.save_top_results(results, query, top_n)
+    
+    # Reformulate query using keyword correlation
+    def reformulate_query(self, original_query, top_n_keywords=3):
+        """
+        Reformulate query by finding most correlated keywords from top results.
+        
+        Args:
+            original_query: The original search query
+            top_n_keywords: Number of top correlated keywords to add
+        
+        Returns:
+            Reformulated query string, or None if no keywords found
+        """
+        top_doc_ids = self.result_manager.get_top_results()
+        if not top_doc_ids:
+            return None
+        
+        # Extract keywords from top results
+        keywords = extract_keywords(top_doc_ids, self.reverse_index)
+        if not keywords:
+            return None
+        
+        # Calculate correlations
+        correlations = calculate_correlations(original_query, keywords, self.reverse_index)
+        if not correlations:
+            return None
+        
+        # Get top N most correlated keywords
+        sorted_keywords = sorted(correlations.items(), key=lambda x: x[1], reverse=True)
+        top_keywords = [kw for kw, score in sorted_keywords[:top_n_keywords]]
+        
+        # Build reformulated query: original query + top correlated keywords
+        reformulated = original_query + " " + " ".join(top_keywords)
+        return reformulated
+    
+
+
     # Clear the results text area
     def clear_results(self):
         self.results_text.delete(1.0, tk.END)
