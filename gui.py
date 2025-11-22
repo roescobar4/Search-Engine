@@ -56,8 +56,24 @@ class SearchGUI:
         self.search_button = ttk.Button(main_frame, text="Search", command=self.search_documents)
         self.search_button.grid(row=0, column=2, pady=(0, 5), padx=(5, 0))
         ttk.Label(main_frame, text="Search Results:").grid(row=1, column=0, sticky=tk.W, pady=(10, 5))
-        self.results_text = scrolledtext.ScrolledText(main_frame, width=70, height=20, wrap=tk.WORD)
-        self.results_text.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        
+        # Create notebook (tab widget) for results
+        self.results_notebook = ttk.Notebook(main_frame)
+        self.results_notebook.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        
+        # Original results tab
+        original_frame = ttk.Frame(self.results_notebook)
+        self.results_text = scrolledtext.ScrolledText(original_frame, width=70, height=20, wrap=tk.WORD)
+        self.results_text.pack(fill=tk.BOTH, expand=True)
+        self.results_notebook.add(original_frame, text="Original Results")
+        
+        # Reformulated results tab
+        reformulated_frame = ttk.Frame(self.results_notebook)
+        self.reformulated_text = scrolledtext.ScrolledText(reformulated_frame, width=70, height=20, wrap=tk.WORD)
+        self.reformulated_text.pack(fill=tk.BOTH, expand=True)
+        # Configure colored text tag for reformulated results
+        self.reformulated_text.tag_config("reformulated", foreground="blue")
+        self.results_notebook.add(reformulated_frame, text="Reformulated Results")
         self.clear_button = ttk.Button(main_frame, text="Clear Results", command=self.clear_results)
         self.clear_button.grid(row=3, column=0, pady=(0, 10))
         self.stats_button = ttk.Button(main_frame, text="Show Stats", command=self.show_stats)
@@ -120,10 +136,12 @@ class SearchGUI:
         # Reformulate query and run new search
         reformulated_query = self.reformulate_query(search_term)
         if reformulated_query and reformulated_query != search_term:
-            # Display separator and reformulated query info
-            self.results_text.insert(tk.END, "\n" + "="*70 + "\n")
-            self.results_text.insert(tk.END, f"REFORMULATED QUERY: {reformulated_query}\n")
-            self.results_text.insert(tk.END, "="*70 + "\n\n")
+            # Clear reformulated results tab
+            self.reformulated_text.delete(1.0, tk.END)
+            
+            # Display reformulated query info in reformulated tab
+            self.reformulated_text.insert(tk.END, f"REFORMULATED QUERY: {reformulated_query}\n", "reformulated")
+            self.reformulated_text.insert(tk.END, "="*70 + "\n\n", "reformulated")
             
             # Run search with reformulated query
             self.status_var.set("Searching with reformulated query...")
@@ -134,37 +152,39 @@ class SearchGUI:
             )
             
             if reformulated_results:
-                self.results_text.insert(tk.END, f"{reformulated_message}:\n\n")
-                # Display reformulated results
+                self.reformulated_text.insert(tk.END, f"{reformulated_message}:\n\n", "reformulated")
+                # Display reformulated results with colored text
                 for i, doc in enumerate(reformulated_results, 1):
                     filename = doc['doc_id'].split('/')[-1]
-                    self.results_text.insert(tk.END, f"{i}. {filename}\n")
+                    self.reformulated_text.insert(tk.END, f"{i}. {filename}\n", "reformulated")
                     if 'similarity' in doc:
-                        self.results_text.insert(tk.END, f"   - Similarity score: {doc['similarity']:.4f}\n")
-                        self.results_text.insert(tk.END, f"   - Matched terms: {', '.join(doc['matched_terms'])}\n")
+                        self.reformulated_text.insert(tk.END, f"   - Similarity score: {doc['similarity']:.4f}\n", "reformulated")
+                        self.reformulated_text.insert(tk.END, f"   - Matched terms: {', '.join(doc['matched_terms'])}\n", "reformulated")
                         if doc['matched_terms']:
                             first_term = doc['matched_terms'][0]
                             if first_term in self.reverse_index:
                                 for doc_data in self.reverse_index[first_term]['docs']:
                                     if doc_data['doc_id'] == doc['doc_id'] and doc_data['positions']:
                                         snippet = self.get_text_snippet(doc['doc_id'], doc_data['positions'][0])
-                                        self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
+                                        self.reformulated_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n", "reformulated")
                                         break
                     else:
-                        self.results_text.insert(tk.END, f"   - Appears {doc['term_freq']} times\n")
-                        self.results_text.insert(tk.END, f"   - TF-IDF score: {doc['tf_idf']:.4f}\n")
-                        self.results_text.insert(tk.END, f"   - Matched term: {doc['matched_term']}\n")
+                        self.reformulated_text.insert(tk.END, f"   - Appears {doc['term_freq']} times\n", "reformulated")
+                        self.reformulated_text.insert(tk.END, f"   - TF-IDF score: {doc['tf_idf']:.4f}\n", "reformulated")
+                        self.reformulated_text.insert(tk.END, f"   - Matched term: {doc['matched_term']}\n", "reformulated")
                         if doc['positions']:
                             positions_str = ', '.join(map(str, doc['positions'][:5]))
                             if len(doc['positions']) > 5:
                                 positions_str += f", ... (+{len(doc['positions']) - 5} more)"
-                            self.results_text.insert(tk.END, f"   - Positions: [{positions_str}]\n")
+                            self.reformulated_text.insert(tk.END, f"   - Positions: [{positions_str}]\n", "reformulated")
                             snippet = self.get_text_snippet(doc['doc_id'], doc['positions'][0])
-                            self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
-                    self.results_text.insert(tk.END, "\n")
+                            self.reformulated_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n", "reformulated")
+                    self.reformulated_text.insert(tk.END, "\n", "reformulated")
+                # Switch to reformulated tab to show results
+                self.results_notebook.select(1)
                 self.status_var.set(f"{message} | Reformulated: {reformulated_message}")
             else:
-                self.results_text.insert(tk.END, f"{reformulated_message}\n")
+                self.reformulated_text.insert(tk.END, f"{reformulated_message}\n", "reformulated")
                 self.status_var.set(f"{message} | Reformulated query: {reformulated_query}")
         else:
             self.status_var.set(message)
@@ -213,6 +233,7 @@ class SearchGUI:
     # Clear the results text area
     def clear_results(self):
         self.results_text.delete(1.0, tk.END)
+        self.reformulated_text.delete(1.0, tk.END)
         self.status_var.set("Results cleared")
     # Extract text snippet around a word position from one period to the next
     def get_text_snippet(self, doc_id, position):
@@ -253,6 +274,8 @@ class SearchGUI:
             return f"Error extracting snippet: {str(e)}"
     # Display comprehensive statistics about the index
     def show_stats(self):
+        # Switch to original results tab
+        self.results_notebook.select(0)
         self.results_text.delete(1.0, tk.END)
         self.status_var.set("Displaying index statistics...")
         self.root.update()
