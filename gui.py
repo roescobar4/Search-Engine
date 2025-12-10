@@ -8,7 +8,7 @@ import zipfile  # Read HTML files from ZIP archive for snippet extraction
 import webbrowser  # Open HTML files in default browser
 import tempfile  # Create temporary files for viewing documents
 import os  # File path operations
-from indexer import build_reverse_index  # Build the reverse index from ZIP file
+from indexer import build_reverse_index, build_document_correlation_list  # Build the reverse index and document correlation list from ZIP file
 from searcher import enhanced_search  # Perform search queries on the index
 from tokenizer import tokenize_html, HTMLTextExtractor  # Extract text content from HTML documents
 from result_manager import ResultManager  # Manage saved search results
@@ -23,6 +23,7 @@ class SearchGUI:
         self.zip_file = zip_file
         self.reverse_index = None
         self.document_map = None
+        self.document_correlation_list = None
         self.zip_handle = None
         self.snippet_parser = None
         self.result_manager = ResultManager()  # Initialize result manager
@@ -43,6 +44,18 @@ class SearchGUI:
         elapsed_time = time.time() - start_time
         print()
         print(f"✓ Total indexing time: {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)")
+        print()
+        # Build document correlation list
+        correlation_start = time.time()
+        self.document_correlation_list = build_document_correlation_list(
+            self.reverse_index, 
+            self.document_map,
+            top_k=10,
+            threshold=0.1
+        )
+        correlation_elapsed = time.time() - correlation_start
+        print()
+        print(f"✓ Document correlation list built in {correlation_elapsed:.2f} seconds ({correlation_elapsed/60:.2f} minutes)")
     # Set up the GUI components
     def setup_gui(self):
         main_frame = ttk.Frame(self.root, padding="10")
@@ -214,6 +227,16 @@ class SearchGUI:
                     self.results_text.insert(tk.END, f"   - Positions: [{positions_str}]\n")
                     snippet = self.get_text_snippet(doc['doc_id'], doc['positions'][0])
                     self.results_text.insert(tk.END, f"   - Snippet: \"{snippet}\"\n")
+            
+            # Display top 5 correlated pages for top 5 results
+            if i <= 5 and self.document_correlation_list:
+                correlated = self.document_correlation_list.get(doc['doc_id'], [])[:5]
+                if correlated:
+                    self.results_text.insert(tk.END, f"   - Top 5 correlated pages:\n")
+                    for j, corr_doc in enumerate(correlated, 1):
+                        corr_filename = corr_doc['doc_id'].split('/')[-1]
+                        self.results_text.insert(tk.END, f"      {j}. {corr_filename} (similarity: {corr_doc['similarity']:.4f})\n")
+            
             self.results_text.insert(tk.END, "\n")
         # Save results for later use
         self.save_top_results(results, search_term)

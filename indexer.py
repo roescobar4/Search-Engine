@@ -78,3 +78,92 @@ def build_reverse_index(zip_path):
     print(f"Total documents in map: {len(document_map)}")
     return reverse_index, document_map
 
+def build_document_correlation_list(reverse_index, document_map, top_k=10, threshold=0.1):
+    """
+    Build document correlation list using cosine similarity.
+    
+    Computes cosine similarity between all document pairs and stores the top-k
+    most similar documents for each document. Uses TF-IDF vectors already
+    computed in the reverse index.
+    
+    Args:
+        reverse_index: The reverse index with TF-IDF scores
+        document_map: Document vector lengths
+        top_k: Number of top correlated documents to store per document
+        threshold: Minimum similarity threshold (only store correlations above this)
+    
+    Returns:
+        Dictionary mapping doc_id to list of correlated documents with scores.
+        Each entry: {'doc_id': str, 'similarity': float}
+    """
+    print("Building document correlation list...")
+    document_correlation = {}
+    all_doc_ids = list(document_map.keys())
+    total_docs = len(all_doc_ids)
+    
+    # Build a mapping from doc_id to all terms it contains (for efficiency)
+    doc_to_terms = {}
+    for term, term_data in reverse_index.items():
+        for doc_info in term_data['docs']:
+            doc_id = doc_info['doc_id']
+            if doc_id not in doc_to_terms:
+                doc_to_terms[doc_id] = {}
+            doc_to_terms[doc_id][term] = doc_info['tf_idf']
+    
+    # Compute cosine similarity for each document pair
+    processed = 0
+    for i, doc1_id in enumerate(all_doc_ids):
+        correlations = []
+        doc1_vector_length = document_map[doc1_id]['vector_length']
+        
+        # Skip if document has zero vector length
+        if doc1_vector_length == 0:
+            document_correlation[doc1_id] = []
+            continue
+        
+        # Get all terms in doc1
+        doc1_terms = doc_to_terms.get(doc1_id, {})
+        
+        # Compare with all other documents
+        for doc2_id in all_doc_ids:
+            if doc1_id == doc2_id:
+                continue
+            
+            doc2_vector_length = document_map[doc2_id]['vector_length']
+            if doc2_vector_length == 0:
+                continue
+            
+            # Get all terms in doc2
+            doc2_terms = doc_to_terms.get(doc2_id, {})
+            
+            # Compute dot product: sum of (tf_idf_doc1 * tf_idf_doc2) for shared terms
+            dot_product = 0
+            # Only iterate through terms in doc1 (smaller set typically)
+            for term, tf_idf_doc1 in doc1_terms.items():
+                if term in doc2_terms:
+                    tf_idf_doc2 = doc2_terms[term]
+                    dot_product += tf_idf_doc1 * tf_idf_doc2
+            
+            # Compute cosine similarity
+            if dot_product > 0:
+                cosine_similarity = dot_product / (doc1_vector_length * doc2_vector_length)
+                
+                # Only store if above threshold
+                if cosine_similarity >= threshold:
+                    correlations.append({
+                        'doc_id': doc2_id,
+                        'similarity': cosine_similarity
+                    })
+        
+        # Sort by similarity (descending) and keep top_k
+        correlations.sort(key=lambda x: x['similarity'], reverse=True)
+        document_correlation[doc1_id] = correlations[:top_k]
+        
+        processed += 1
+        if processed % 100 == 0:
+            print(f"Progress: {processed}/{total_docs} documents processed...")
+    
+    print(f"Document correlation list complete!")
+    print(f"Total documents with correlations: {len([d for d in document_correlation.values() if d])}")
+    return document_correlation
+
